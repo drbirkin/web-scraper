@@ -1,52 +1,51 @@
 import requests
 import time
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
+
+# tutorials: https://www.youtube.com/watch?v=fKl2JW_qrso
 
 def scrape_routes(soup, region, routes):
     for tag in soup.find_all("a"):
         link = tag.get("href", "").casefold()
         full_link = news_url + link
         if link and link.startswith(f"/{region}/course") and (link not in routes[region] and full_link not in routes[region]):
-            routes[region].append(full_link)
+            routes[region].add(full_link)
 
-def scrape_courses(region_code):
-    url = f"{news_url}/{region_code}/products/training"
-    routes = {region_code: [url]}
+def scrape_course_info(region_code, route_url):
+    response = requests.get(route_url)
+    print(response, route_url)
     course_infos = []
 
-    for route_url in routes[region_code]:
-        response = requests.get(route_url)
-        print(response, route_url)
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.text, "html.parser")
+        scrape_routes(soup, region_code, routes)
 
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, "html.parser")
-            scrape_routes(soup, region_code, routes)
+        course_name = soup.title.string.replace(",", " ")
 
-            course_name = soup.title.string.replace(",", " ")
+        for element in soup.select("div[id='course-offering-tbl'] div.row.pt-2.pb-2"):
+            course_contents = list(filter(lambda x: not isinstance(x, str), element.contents))
+            course_date, course_location = course_contents[1].string, course_contents[2].string
+            course_price = float(course_contents[3].string.split()[1].replace(",", ""))
+            course_currency = "CAD" if region_code == "en-ca" else "USD"
+            course_id = int(course_contents[4].a.get("href").split("/")[-2])
 
-            for element in soup.select("div[id='course-offering-tbl'] div.row.pt-2.pb-2"):
-                course_contents = list(filter(lambda x: not isinstance(x, str), element.contents))
-                course_date, course_location = course_contents[1].string, course_contents[2].string
-                course_price = float(course_contents[3].string.split()[1].replace(",", ""))
-                course_currency = "CAD" if region_code == "en-ca" else "USD"
-                course_id = int(course_contents[4].a.get("href").split("/")[-2])
+            if course_date != "Anytime":
+                course_infos.append(
+                    {
+                        "region code": region_code,
+                        "id": course_id,
+                        "url": route_url,
+                        "course": course_name,
+                        "currency": course_currency,
+                        "date": course_date,
+                        "location": course_location,
+                        "price": course_price,
+                    }
+                )
+    else:
+        print("Failed to retrieve the page.")
 
-                if course_date != "Anytime": 
-                    course_infos.append(
-                        {
-                            "region code": region_code,
-                            "id": course_id,
-                            "url": route_url,
-                            "course": course_name,
-                            "currency": course_currency,
-                            "date": course_date,
-                            "location": course_location,
-                            "price": course_price,
-                        }
-                    )
-        else:
-            print("Failed to retrieve the page.")
-    
     return course_infos
 
 def export_csv(course_infos):
@@ -61,11 +60,19 @@ def export_csv(course_infos):
             )
 
 if __name__ == "__main__":
+    start = time.perf_counter()
     news_url = "https://www.pinkelephant.com"
     region_codes = ["en-us", "en-ca"]
+    routes = {region_code: set() for region_code in region_codes}
     course_infos = []
 
-    for region_code in region_codes:
-        course_infos.extend(scrape_courses(region_code))
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        for region_code in region_codes:
+            base_url = f"{news_url}/{region_code}/products/training"
+            routes[region_code].add(base_url)
+            course_infos.extend(executor.map(scrape_course_info, [region_code] * len(routes[region_code]), routes[region_code]))
 
     export_csv(course_infos)
+    
+    finish = time.perf_counter()
+    print(f'Finish in {round(start - finish, 2)} secs')
