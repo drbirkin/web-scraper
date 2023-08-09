@@ -5,8 +5,9 @@ from bs4 import BeautifulSoup
 def scrape_routes(soup, region, routes):
     for tag in soup.find_all("a"):
         link = tag.get("href", "").casefold()
-        if link and link.startswith(f"/{region}/course") and link not in routes[region]:
-            routes[region].append(news_url + link)
+        full_link = news_url + link
+        if link and link.startswith(f"/{region}/course") and (link not in routes[region] and full_link not in routes[region]):
+            routes[region].append(full_link)
 
 def scrape_courses(region_code):
     url = f"{news_url}/{region_code}/products/training"
@@ -21,7 +22,7 @@ def scrape_courses(region_code):
             soup = BeautifulSoup(response.text, "html.parser")
             scrape_routes(soup, region_code, routes)
 
-            course_name = soup.title.string
+            course_name = soup.title.string.replace(",", " ")
 
             for element in soup.select("div[id='course-offering-tbl'] div.row.pt-2.pb-2"):
                 course_contents = list(filter(lambda x: not isinstance(x, str), element.contents))
