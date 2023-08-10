@@ -1,21 +1,26 @@
 import requests
 import time
 from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
 
 # tutorials: https://www.youtube.com/watch?v=fKl2JW_qrso
+
 
 def scrape_routes(soup, region, routes):
     for tag in soup.find_all("a"):
         link = tag.get("href", "").casefold()
         full_link = news_url + link
-        if link and link.startswith(f"/{region}/course") and (link not in routes[region] and full_link not in routes[region]):
+        if (
+            link
+            and link.startswith(f"/{region}/course")
+            and (link not in routes[region] and full_link not in routes[region])
+        ):
             routes[region].add(full_link)
+
 
 def scrape_course_info(region_code, route_url):
     response = requests.get(route_url)
     print(response, route_url)
-    course_infos = []
 
     if response.status_code == 200:
         soup = BeautifulSoup(response.text, "html.parser")
@@ -23,9 +28,15 @@ def scrape_course_info(region_code, route_url):
 
         course_name = soup.title.string.replace(",", " ")
 
+        # process only in course detail page
         for element in soup.select("div[id='course-offering-tbl'] div.row.pt-2.pb-2"):
-            course_contents = list(filter(lambda x: not isinstance(x, str), element.contents))
-            course_date, course_location = course_contents[1].string, course_contents[2].string
+            course_contents = list(
+                filter(lambda x: not isinstance(x, str), element.contents)
+            )
+            course_date, course_location = (
+                course_contents[1].string,
+                course_contents[2].string,
+            )
             course_price = float(course_contents[3].string.split()[1].replace(",", ""))
             course_currency = "CAD" if region_code == "en-ca" else "USD"
             course_id = int(course_contents[4].a.get("href").split("/")[-2])
@@ -46,11 +57,12 @@ def scrape_course_info(region_code, route_url):
     else:
         print("Failed to retrieve the page.")
 
-    return course_infos
 
 def export_csv(course_infos):
     obj = time.localtime()
-    csv_filename = f"./data/proceed/courses_overview_{obj.tm_year}_{obj.tm_mon}_{obj.tm_mday}.csv"
+    csv_filename = (
+        f"./data/proceed/courses_overview_{obj.tm_year}_{obj.tm_mon}_{obj.tm_mday}.csv"
+    )
 
     with open(csv_filename, "w") as course_file:
         course_file.write("Region, Course, Date, Price, Id, Location, Currency, URL \n")
@@ -58,6 +70,7 @@ def export_csv(course_infos):
             course_file.write(
                 f"{info['region code']}, {info['course']}, {info['date']}, {info['price']}, {info['id']}, {info['location']}, {info['currency']}, {info['url']} \n"
             )
+
 
 if __name__ == "__main__":
     start = time.perf_counter()
@@ -67,12 +80,23 @@ if __name__ == "__main__":
     course_infos = []
 
     with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = []
         for region_code in region_codes:
             base_url = f"{news_url}/{region_code}/products/training"
             routes[region_code].add(base_url)
-            course_infos.extend(executor.map(scrape_course_info, [region_code] * len(routes[region_code]), routes[region_code]))
+            for route in routes[region_code]:
+                futures.append(executor.submit(scrape_course_info, region_code, route))
 
+            wait(futures, return_when=ALL_COMPLETED)
+            # append to course_infos
+            executor.map(
+                scrape_course_info,
+                [region_code] * len(routes[region_code]),
+                routes[region_code],
+            )
+
+    # print(course_infos)
     export_csv(course_infos)
-    
+
     finish = time.perf_counter()
-    print(f'Finish in {round(start - finish, 2)} secs')
+    print(f"Finish in {round(start - finish, 2)} secs")
