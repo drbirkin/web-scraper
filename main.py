@@ -16,36 +16,32 @@ def scrape_routes(soup):
 def scrape_news():
     headlines = []
     for url in routes:
-        response = requests.get(url)
+        response = requests.get(url, verify=False)
         print(response, url)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, "html.parser")
             scrape_routes(soup)
             # print(routes)
-            for element in soup.find_all("div"):
-                headlines.append(
-                    {"url": url, "article": element.get_text(strip=True).casefold()}
-                )
+            headlines = find_string(soup.descendants, headlines, url)
         else:
             print("Failed to retrieve the page.")
     return headlines
 
 
-def find_string(articles, target_string):
-    found_strings = [
-        {"url": data["url"], "string": target_string, "element": data["article"]}
-        for data in articles
-        if target_string in data["article"]
-    ]
-    return found_strings
+def find_string(tags, headlines, url):
+    for element in tags:
+        if element.string and target_string in element.string:
+            headlines.append(
+                {"url": url, "tags": element}
+            )
+
+    return headlines
 
 
 if __name__ == "__main__":
     news_url = "https://www.pinkelephant.com/en-us"
     routes = [news_url]
-    target_string = "PDC"
+    target_string = "PINKLINK-INTERNAL"
     # print(routes)
     news_headlines = scrape_news()
-    found_strings = find_string(news_headlines, target_string)
-
-    print(found_strings)
+    print(news_headlines)
